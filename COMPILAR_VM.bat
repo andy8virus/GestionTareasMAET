@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
-REM Script para compilar GestionTareasMAET.exe (x64) en Windows
+REM Script para compilar GestionProcesos.exe (x64) en Windows
 REM Ejecutar en VM Windows desde la carpeta del proyecto
 
 echo ========================================
-echo  Compilacion Windows x64 - MAET
+echo  Compilacion Windows x64 - Procesos
 echo ========================================
 echo.
 
@@ -46,8 +46,8 @@ echo ========================================
 echo  Compilacion completada
 echo ========================================
 echo.
-echo El .exe esta en: dist\GestionTareasMAET\GestionTareasMAET.exe
+echo El .exe esta en: dist\GestionProcesos\GestionProcesos.exe
 echo.
-echo Para distribuir: comprime TODA la carpeta dist\GestionTareasMAET
+echo Para distribuir: comprime TODA la carpeta dist\GestionProcesos
 echo.
 pause

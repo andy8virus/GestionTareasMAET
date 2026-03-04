@@ -30,7 +30,7 @@ Si funciona con `python` pero no con el .exe, el problema está en el empaquetad
 
 El .exe debe estar en la misma carpeta que:
 - `customtkinter/` (carpeta incluida por PyInstaller)
-- `tareas.db` (se crea automáticamente al iniciar)
+- `procesos.db` (se crea automáticamente al iniciar)
 - `assets/` (para imágenes de fondo, si las usas)
 
-La base de datos y assets se crean junto al .exe en la carpeta `dist/GestionTareasMAET/`.
+La base de datos y assets se crean junto al .exe en la carpeta `dist/GestionProcesos/`.

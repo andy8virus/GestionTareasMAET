@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Gestión de Tareas MAET - Arquitectura por Roles
+Gestión de Procesos - Panel de administración
 Dashboard Usuario + Panel de Administración
 """
 
@@ -32,7 +32,7 @@ except ImportError:
 try:
     import matplotlib
     matplotlib.use("TkAgg")
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
     from matplotlib.figure import Figure
     MATPLOTLIB_OK = True
 except ImportError:
@@ -51,9 +51,9 @@ except ImportError:
     TKCALENDAR_OK = False
 
 # Configuración
-APP_TITLE = "Gestión de Tareas MAET"
-DB_FILE = "tareas.db"
-CLAVE_ADMIN = "MAET2026"
+APP_TITLE = "Gestión de Procesos"
+DB_FILE = "procesos.db"
+CLAVE_ADMIN = "Soporte123"
 USUARIO_ADMIN = "admin"
 ASSETS_DIR = Path(__file__).parent / "assets"
 FONDO_DEFAULT = ASSETS_DIR / "fondo_dashboard.jpg"
@@ -237,7 +237,7 @@ class BaseDatos:
 
     def _insertar_config_default(self, conn):
         conn.execute(
-            "INSERT OR IGNORE INTO config_dashboard (clave, valor) VALUES ('tarjeta', 'Bienvenido al Dashboard MAET')"
+            "INSERT OR IGNORE INTO config_dashboard (clave, valor) VALUES ('tarjeta', 'Bienvenido')"
         )
         conn.execute(
             "INSERT OR IGNORE INTO config_dashboard (clave, valor) VALUES ('fondo', '')"
@@ -289,32 +289,56 @@ class BaseDatos:
                 "SELECT id, nombre, codigo, es_admin FROM usuarios ORDER BY nombre"
             ).fetchall()]
 
-    def crear_usuario(self, nombre, codigo, clave):
+    def crear_usuario(self, nombre, codigo, clave, es_admin=False):
         cod = (codigo or "").strip() or (nombre or "U").upper()[:8].replace(" ", "_")
         with self._conectar() as conn:
             conn.execute(
-                "INSERT INTO usuarios (nombre, codigo, clave, es_admin) VALUES (?, ?, ?, 0)",
-                (nombre, cod, clave)
+                "INSERT INTO usuarios (nombre, codigo, clave, es_admin) VALUES (?, ?, ?, ?)",
+                (nombre, cod, clave, 1 if es_admin else 0)
             )
             conn.commit()
 
-    def actualizar_usuario(self, id_u, nombre, codigo, clave):
+    def actualizar_usuario(self, id_u, nombre, codigo, clave, es_admin=None):
+        cod = codigo or (nombre.upper()[:8] if nombre else "")
         with self._conectar() as conn:
-            if clave:
+            if es_admin is not None:
+                r = conn.execute("SELECT es_admin FROM usuarios WHERE id=?", (id_u,)).fetchone()
+                if r and r[0] == 1 and not es_admin and self.contar_admins() <= 1:
+                    raise ValueError("No se puede quitar el rol de administrador al último admin.")
+                if clave:
+                    conn.execute(
+                        "UPDATE usuarios SET nombre=?, codigo=?, clave=?, es_admin=? WHERE id=?",
+                        (nombre, cod, clave, 1 if es_admin else 0, id_u)
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE usuarios SET nombre=?, codigo=?, es_admin=? WHERE id=?",
+                        (nombre, cod, 1 if es_admin else 0, id_u)
+                    )
+            elif clave:
                 conn.execute(
                     "UPDATE usuarios SET nombre=?, codigo=?, clave=? WHERE id=?",
-                    (nombre, codigo or nombre.upper()[:8], clave, id_u)
+                    (nombre, cod, clave, id_u)
                 )
             else:
                 conn.execute(
                     "UPDATE usuarios SET nombre=?, codigo=? WHERE id=?",
-                    (nombre, codigo or nombre.upper()[:8], id_u)
+                    (nombre, cod, id_u)
                 )
             conn.commit()
 
+    def contar_admins(self):
+        with self._conectar() as conn:
+            return conn.execute("SELECT COUNT(*) FROM usuarios WHERE es_admin=1").fetchone()[0]
+
     def eliminar_usuario(self, id_u):
         with self._conectar() as conn:
-            conn.execute("DELETE FROM usuarios WHERE id=? AND es_admin=0", (id_u,))
+            r = conn.execute("SELECT es_admin FROM usuarios WHERE id=?", (id_u,)).fetchone()
+            if not r:
+                return
+            if r[0] == 1 and self.contar_admins() <= 1:
+                raise ValueError("No se puede eliminar el último administrador.")
+            conn.execute("DELETE FROM usuarios WHERE id=?", (id_u,))
             conn.commit()
 
     def obtener_usuario(self, id_u):
@@ -454,6 +478,23 @@ class BaseDatos:
                 grupos[k] += c
             return dict(grupos)
 
+    def estadisticas_apiladas_usuario_estado(self, usuario_id=None):
+        """Retorna {usuario: {estado: count}} para gráfico de barras apiladas."""
+        with self._conectar() as conn:
+            where = " AND responsable_id=?" if usuario_id else ""
+            params = (usuario_id,) if usuario_id else ()
+            rows = conn.execute(
+                f"""SELECT responsable_nombre, estado, COUNT(*) as c FROM tareas
+                    WHERE (archivada IS NULL OR archivada=0) AND responsable_nombre IS NOT NULL {where}
+                    GROUP BY responsable_nombre, estado""",
+                params
+            ).fetchall()
+            from collections import defaultdict
+            data = defaultdict(lambda: defaultdict(int))
+            for usr, est, c in rows:
+                data[usr][est] = c
+            return dict(data)
+
 
 class SemáforoCircular(ctk.CTkFrame):
     def __init__(self, parent, color, size=28, **kwargs):
@@ -518,7 +559,7 @@ class PantallaLogin(ctk.CTkFrame):
     def _crear_ui(self):
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(self, text="Gestión de Tareas MAET", font=("Segoe UI Semibold", 22),
+        ctk.CTkLabel(self, text="Gestión de Procesos", font=("Segoe UI Semibold", 22),
                      text_color=COLORES["texto"]).grid(row=0, column=0, pady=(24, 16))
         crear_reloj(self, font=("Segoe UI", 10)).grid(row=0, column=1, padx=20, pady=(24, 16), sticky="e")
         self.tabview = ctk.CTkTabview(self, width=400, height=320, fg_color=COLORES["card"])
@@ -918,7 +959,9 @@ class PanelAdmin(TkFrame):
         self.ent_u_codigo.grid(row=0, column=1, padx=(0,8))
         self.ent_u_clave = ctk.CTkEntry(f_add, placeholder_text="Clave", show="•", width=140, height=36)
         self.ent_u_clave.grid(row=0, column=2, padx=(0,8))
-        ctk.CTkButton(f_add, text="Crear", command=self._crear_usuario, width=80).grid(row=0, column=3, padx=(0,8))
+        self.chk_es_admin = ctk.CTkCheckBox(f_add, text="Administrador", width=120)
+        self.chk_es_admin.grid(row=0, column=3, padx=(0,8))
+        ctk.CTkButton(f_add, text="Crear", command=self._crear_usuario, width=80).grid(row=0, column=4, padx=(0,8))
         self.contenedor_u = ctk.CTkScrollableFrame(tab, fg_color="transparent")
         self.contenedor_u.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0,20))
         self._cargar_usuarios()
@@ -946,11 +989,14 @@ class PanelAdmin(TkFrame):
         if not n or not cl:
             messagebox.showerror("Error", "Nombre y clave requeridos.", parent=self.winfo_toplevel())
             return
+        es_admin = self.chk_es_admin.get() if hasattr(self, "chk_es_admin") else False
         try:
-            self.db.crear_usuario(n, c or n.upper()[:8], cl)
+            self.db.crear_usuario(n, c or n.upper()[:8], cl, es_admin=es_admin)
             self.ent_u_nombre.delete(0,"end")
             self.ent_u_codigo.delete(0,"end")
             self.ent_u_clave.delete(0,"end")
+            if hasattr(self, "chk_es_admin"):
+                self.chk_es_admin.deselect()
             self._cargar_usuarios()
             self._actualizar_combo_responsable()
         except sqlite3.IntegrityError:
@@ -960,12 +1006,11 @@ class PanelAdmin(TkFrame):
         for w in self.contenedor_u.winfo_children():
             w.destroy()
         for u in self.db.listar_usuarios():
-            if u["es_admin"]:
-                continue
             f = ctk.CTkFrame(self.contenedor_u, fg_color=COLORES["fondo"], corner_radius=8)
             f.grid_columnconfigure(0, weight=1)
             f.grid(row=len(self.contenedor_u.winfo_children()), column=0, sticky="ew", pady=(0,8))
-            ctk.CTkLabel(f, text=f"{u['nombre']} — Cód: {u.get('codigo','')}", font=("Segoe UI", 12),
+            rol = " (Admin)" if u["es_admin"] else ""
+            ctk.CTkLabel(f, text=f"{u['nombre']} — Cód: {u.get('codigo','')}{rol}", font=("Segoe UI", 12),
                         wraplength=450, anchor="w").grid(row=0, column=0, padx=12, pady=8, sticky="w")
             ctk.CTkButton(f, text="Editar", command=lambda i=u["id"]: self._editar_usuario(i), width=70).grid(row=0, column=1, padx=8, pady=8)
             ctk.CTkButton(f, text="Eliminar", command=lambda i=u["id"]: self._eliminar_usuario(i),
@@ -977,7 +1022,7 @@ class PanelAdmin(TkFrame):
             return
         dlg = ctk.CTkToplevel(self)
         dlg.title("Editar Usuario")
-        dlg.geometry("360x200")
+        dlg.geometry("360x260")
         dlg.transient(self.winfo_toplevel())
         dlg.grab_set()
         ctk.CTkLabel(dlg, text="Nombre:").pack(anchor="w", padx=20, pady=(20,4))
@@ -990,18 +1035,30 @@ class PanelAdmin(TkFrame):
         ent_c.insert(0, u.get("codigo") or "")
         ctk.CTkLabel(dlg, text="Nueva clave (vacío=mantener):").pack(anchor="w", padx=20, pady=(4,4))
         ent_cl = ctk.CTkEntry(dlg, width=300, show="•")
-        ent_cl.pack(padx=20, pady=(0,12))
+        ent_cl.pack(padx=20, pady=(0,8))
+        chk_admin = ctk.CTkCheckBox(dlg, text="Es administrador")
+        chk_admin.pack(anchor="w", padx=20, pady=(8,12))
+        if u.get("es_admin"):
+            chk_admin.select()
         def guardar():
-            self.db.actualizar_usuario(id_u, ent_n.get().strip(), ent_c.get().strip(), ent_cl.get().strip())
-            dlg.destroy()
-            self._cargar_usuarios()
-        ctk.CTkButton(dlg, text="Guardar", command=guardar).pack(pady=20)
+            try:
+                self.db.actualizar_usuario(id_u, ent_n.get().strip(), ent_c.get().strip(),
+                                           ent_cl.get().strip(), es_admin=chk_admin.get())
+                dlg.destroy()
+                self._cargar_usuarios()
+                self._actualizar_combo_responsable()
+            except ValueError as ex:
+                messagebox.showerror("Error", str(ex), parent=dlg)
+        ctk.CTkButton(dlg, text="Guardar", command=guardar).pack(pady=16)
 
     def _eliminar_usuario(self, id_u):
         if messagebox.askyesno("Confirmar", "¿Eliminar usuario?"):
-            self.db.eliminar_usuario(id_u)
-            self._cargar_usuarios()
-            self._actualizar_combo_responsable()
+            try:
+                self.db.eliminar_usuario(id_u)
+                self._cargar_usuarios()
+                self._actualizar_combo_responsable()
+            except ValueError as e:
+                messagebox.showerror("Error", str(e), parent=self.winfo_toplevel())
 
     def _tab_tareas(self):
         tab = self.tabview.tab("Gestión de Tareas")
@@ -1173,9 +1230,11 @@ class PanelAdmin(TkFrame):
             return
         try:
             user = self.combo_stat_user.get()
-            uid = None if user == "Todos" else next((u["id"] for u in self.db.listar_usuarios() if u["nombre"] == user), None)
+            uid = None if user == "Todos" else next((u["id"] for u in self.db.listar_usuarios() if not u["es_admin"] and u["nombre"] == user), None)
             per = self.combo_stat_periodo.get().lower()[:3]
-            fig = Figure(figsize=(8, 9), dpi=100)
+            fig = Figure(figsize=(10, 11), dpi=100)
+
+            # 1. Gráfico de torta - por estado
             stats_est = self.db.estadisticas_por_estado(None, None, uid)
             lbs = list(stats_est.keys())
             vls = list(stats_est.values())
@@ -1183,31 +1242,66 @@ class PanelAdmin(TkFrame):
                 lbs, vls = ["Sin datos"], [1]
             cols = [COLOR_ESTADO.get(l, COLORES["acento"]) for l in lbs]
             ax1 = fig.add_subplot(311)
-            ax1.pie(vls, labels=lbs, autopct="%1.0f%%", colors=cols)
-            ax1.set_title("Por estado de tarea")
-            stats_usr = self.db.estadisticas_por_usuario()
-            u_lbs = list(stats_usr.keys())
-            u_vls = list(stats_usr.values())
-            if not u_lbs or not u_vls:
-                u_lbs, u_vls = ["Sin datos"], [1]
+            wedges, texts, autotexts = ax1.pie(vls, labels=lbs, autopct="%1.1f%%", colors=cols,
+                                                explode=[0.02]*len(lbs), shadow=True, startangle=90)
+            for t in autotexts:
+                t.set_fontsize(9)
+            ax1.set_title("Torta: tareas por estado")
+
+            # 2. Gráfico de barras apiladas - usuario x estado
+            stacked = self.db.estadisticas_apiladas_usuario_estado(uid)
+            usuarios = sorted(stacked.keys()) if stacked else ["Sin datos"]
+            estados_orden = [ESTADO_PENDIENTE, ESTADO_FUERA_PLAZO, ESTADO_TERMINADA, ESTADO_NO_REALIZADA]
+            bottom = [0] * len(usuarios)
             ax2 = fig.add_subplot(312)
-            ax2.bar(u_lbs, u_vls, color=COLORES["acento"])
-            ax2.set_title("Por usuario responsable")
-            ax2.tick_params(axis="x", rotation=30)
+            for est in estados_orden:
+                vals = [stacked.get(u, {}).get(est, 0) for u in usuarios]
+                if any(vals):
+                    ax2.bar(usuarios, vals, bottom=bottom, label=est,
+                            color=COLOR_ESTADO.get(est, COLORES["acento"]))
+                    bottom = [b + v for b, v in zip(bottom, vals)]
+            if not usuarios or usuarios == ["Sin datos"]:
+                ax2.bar(["Sin datos"], [1], color=COLORES["acento"])
+            ax2.set_ylabel("Cantidad")
+            ax2.set_title("Barras apiladas: tareas por usuario y estado")
+            ax2.legend(loc="upper right", fontsize=8)
+            ax2.tick_params(axis="x", rotation=25)
+
+            # 3. Gráfico de líneas - tareas en el tiempo
             stats_fec = self.db.estadisticas_por_fecha(agrupar=per)
-            f_lbs = list(stats_fec.keys())
-            f_vls = list(stats_fec.values())
-            if not f_lbs or not f_vls:
-                f_lbs, f_vls = ["Sin datos"], [1]
-            f_lbs, f_vls = f_lbs[-10:], f_vls[-10:]
+            def _orden_fecha(k):
+                try:
+                    if len(k) == 4:  # año
+                        return datetime(int(k), 1, 1)
+                    if k.count("/") == 1:  # mes/año
+                        m, a = k.split("/")
+                        return datetime(int(a), int(m), 1)
+                    return parsear_datetime(k + " 00:00") or datetime_pc()
+                except Exception:
+                    return datetime_pc()
+            f_lbs = sorted(stats_fec.keys(), key=_orden_fecha)
+            f_vls = [stats_fec[k] for k in f_lbs][-15:]
+            f_lbs = f_lbs[-15:]
             ax3 = fig.add_subplot(313)
-            ax3.bar(f_lbs, f_vls, color=COLORES["verde"])
-            ax3.set_title(f"Por fecha ({self.combo_stat_periodo.get()})")
-            ax3.tick_params(axis="x", rotation=30)
+            if f_lbs and f_vls:
+                ax3.plot(range(len(f_lbs)), f_vls, "o-", color=COLORES["acento"], linewidth=2, markersize=8)
+                ax3.fill_between(range(len(f_lbs)), f_vls, alpha=0.3, color=COLORES["acento"])
+                ax3.set_xticks(range(len(f_lbs)))
+                ax3.set_xticklabels(f_lbs, rotation=35, ha="right")
+            else:
+                ax3.plot([0], [0], "o-", color=COLORES["acento"])
+                ax3.set_xticks([0])
+                ax3.set_xticklabels(["Sin datos"])
+            ax3.set_ylabel("Cantidad")
+            ax3.set_title(f"Líneas: tareas en el tiempo ({self.combo_stat_periodo.get()})")
+
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, master=self.frame_charts)
             canvas.draw()
             canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+            toolbar_frame = TkFrame(self.frame_charts, bg=COLORES["fondo"])
+            toolbar_frame.grid(row=1, column=0, sticky="ew")
+            NavigationToolbar2Tk(canvas, toolbar_frame)
         except Exception as ex:
             ctk.CTkLabel(self.frame_charts, text=f"No se pudieron cargar las estadísticas.\n{ex}",
                          font=("Segoe UI", 12), text_color=COLORES["texto_secundario"]).grid(row=0, column=0, pady=40)

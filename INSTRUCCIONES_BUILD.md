@@ -1,4 +1,4 @@
-# Instrucciones para Compilar Gestión de Tareas MAET
+# Instrucciones para Compilar Gestión de Procesos
 
 ## Requisitos Previos
 
@@ -50,9 +50,9 @@ pip install pyinstaller
 pyinstaller build_exe.spec
 ```
 
-4. El ejecutable estará en: `dist/GestionTareasMAET/GestionTareasMAET.exe`
+4. El ejecutable estará en: `dist/GestionProcesos/GestionProcesos.exe`
 
-5. **Distribución:** Comprime toda la carpeta `dist/GestionTareasMAET` en un ZIP y compártela. El usuario debe extraerla y ejecutar `GestionTareasMAET.exe`. El archivo `tareas.db` se creará automáticamente en la misma carpeta donde se ejecute.
+5. **Distribución:** Comprime toda la carpeta `dist/GestionTareasMAET` en un ZIP y compártela. El usuario debe extraerla y ejecutar `GestionTareasMAET.exe`. El archivo `procesos.db` se creará automáticamente en la misma carpeta donde se ejecute.
 
 ### Opción 2: Compilar desde Mac usando GitHub Actions
 
@@ -85,8 +85,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GestionTareasMAET-Windows
-          path: dist/GestionTareasMAET
+          name: GestionProcesos-Windows
+          path: dist/GestionProcesos
 ```
 
 Sube el proyecto, ejecuta el workflow y descarga el ZIP del artefacto.
@@ -122,11 +122,11 @@ Aplicacion_gestion/
 ├── requirements.txt       # Dependencias
 ├── build_exe.spec         # Configuración PyInstaller
 ├── INSTRUCCIONES_BUILD.md # Este archivo
-└── tareas.db              # (se crea al ejecutar) Base de datos local
+└── procesos.db              # (se crea al ejecutar) Base de datos local
 ```
 
 ## Usuarios y Acceso
 
-- **Admin:** Usuario `Andy` con clave `MAET2026` (acceso a Gestión de Usuarios).
+- **Admin:** Usuario `admin` con clave `Soporte123` (acceso al panel de administración).
 - **Tareas:** Cada usuario debe ingresar con su propia clave para agregar o editar tareas.
 - El admin puede agregar y eliminar usuarios desde la pestaña "Gestión de Usuarios".

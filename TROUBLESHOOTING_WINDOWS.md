@@ -48,8 +48,8 @@ pip install pyinstaller
 pyinstaller build_exe.spec
 ```
 
-4. El .exe estará en: `dist\GestionTareasMAET\GestionTareasMAET.exe`
-5. **Importante:** Copia toda la carpeta `dist\GestionTareasMAET`, no solo el .exe. Dentro deben estar también la subcarpeta `customtkinter` y los archivos de datos.
+4. El .exe estará en: `dist\GestionProcesos\GestionProcesos.exe`
+5. **Importante:** Copia toda la carpeta `dist\GestionProcesos`, no solo el .exe. Dentro deben estar también la subcarpeta `customtkinter` y los archivos de datos.
 
 ---
 

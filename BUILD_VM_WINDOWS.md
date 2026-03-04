@@ -56,10 +56,10 @@ pyinstaller build_exe.spec
 
 4. El resultado estará en:
    ```
-   dist\GestionTareasMAET\GestionTareasMAET.exe
+   dist\GestionProcesos\GestionProcesos.exe
    ```
 
-5. Para distribuir, comprime **toda la carpeta** `dist\GestionTareasMAET` (incluye el .exe, `customtkinter`, etc.).
+5. Para distribuir, comprime **toda la carpeta** `dist\GestionProcesos` (incluye el .exe, `customtkinter`, etc.).
 
 ---
 
@@ -68,7 +68,7 @@ pyinstaller build_exe.spec
 En PowerShell (como administrador opcional):
 
 ```powershell
-[System.Reflection.Assembly]::LoadFile("ruta_completa\GestionTareasMAET.exe").GetName().ProcessorArchitecture
+[System.Reflection.Assembly]::LoadFile("ruta_completa\GestionProcesos.exe").GetName().ProcessorArchitecture
 ```
 
 O usa herramientas como **Dependencies** o **PEview** para revisar el ejecutable.
@@ -84,4 +84,4 @@ O usa herramientas como **Dependencies** o **PEview** para revisar el ejecutable
 | 3 | Copiar carpeta `Aplicacion_gestion` a la VM |
 | 4 | `pip install -r requirements.txt` y `pip install pyinstaller` |
 | 5 | `pyinstaller build_exe.spec` |
-| 6 | Usar la carpeta `dist\GestionTareasMAET` como distribución |
+| 6 | Usar la carpeta `dist\GestionProcesos` como distribución |

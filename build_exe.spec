@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec para Gestión de Tareas MAET - Windows x64
+# PyInstaller spec para Gestión de Procesos - Windows x64
 # EJECUTAR EN WINDOWS (VM o PC): pyinstaller build_exe.spec
 # Usar Python 64-bit para generar .exe x64 compatible con Windows 11.
 #
@@ -42,7 +42,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='GestionTareasMAET',
+    name='GestionProcesos',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -65,5 +65,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='GestionTareasMAET',
+    name='GestionProcesos',
 )
