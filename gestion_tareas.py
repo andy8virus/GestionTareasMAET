@@ -74,6 +74,14 @@ COLOR_ESTADO = {
     ESTADO_NO_REALIZADA: "#EA580C",
 }
 
+# Tonos claros para fondo de tarjetas (reflejan el estado)
+COLOR_ESTADO_TINTE = {
+    ESTADO_PENDIENTE: "#FFFBEB",   # amarillo suave
+    ESTADO_FUERA_PLAZO: "#FEF2F2", # rojo suave
+    ESTADO_TERMINADA: "#F0FDF4",   # verde suave
+    ESTADO_NO_REALIZADA: "#FFF7ED", # naranja suave
+}
+
 COLORES = {
     "fondo": "#F8FAFC",
     "card": "#FFFFFF",
@@ -105,7 +113,19 @@ def crear_reloj(parent, font=("Segoe UI", 11), **kwargs):
     return lbl
 
 
-# Botones visibles en modales (tk.Button garantiza texto legible en todas las plataformas)
+# Botones visibles (tk.Button garantiza texto legible en todas las plataformas)
+def _crear_btns_tarea(parent, on_editar, on_archivar, on_eliminar, texto_archivar="Archivar"):
+    """Crea fila de botones Editar, Archivar/Desarchivar, Eliminar para cada tarea."""
+    f = TkFrame(parent, bg=COLORES["card"])
+    TkButton(f, text="Editar", command=on_editar, font=("Segoe UI", 10),
+             bg=COLORES["acento"], fg="white", padx=12, pady=6, relief="raised", bd=1, cursor="hand2").pack(side="left", padx=(0, 6))
+    TkButton(f, text=texto_archivar, command=on_archivar, font=("Segoe UI", 10),
+             bg=COLORES["amarillo"], fg="white", padx=12, pady=6, relief="raised", bd=1, cursor="hand2").pack(side="left", padx=(0, 6))
+    TkButton(f, text="Eliminar", command=on_eliminar, font=("Segoe UI", 10),
+             bg=COLORES["rojo"], fg="white", padx=12, pady=6, relief="raised", bd=1, cursor="hand2").pack(side="left")
+    return f
+
+
 def _crear_btns_modal(contenedor, on_aceptar, on_cancelar, texto_aceptar="✓ Confirmar cambio"):
     f = TkFrame(contenedor, bg=COLORES["card"])
     b1 = TkButton(f, text=texto_aceptar, command=on_aceptar, font=("Segoe UI", 12, "bold"),
@@ -124,7 +144,7 @@ def datetime_pc():
 
 
 def parsear_datetime(texto):
-    texto = texto.strip()
+    texto = (texto or "").strip()
     for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y"):
         try:
             dt = datetime.strptime(texto, fmt)
@@ -133,7 +153,29 @@ def parsear_datetime(texto):
             return dt
         except ValueError:
             continue
+    # Formato de BD YYYY-MM-DD HH:MM
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(texto, fmt)
+            if fmt == "%Y-%m-%d":
+                dt = dt.replace(hour=23, minute=59, second=0)
+            return dt
+        except ValueError:
+            continue
     return None
+
+
+def formatear_fecha_display(texto):
+    """Formatea fecha de BD (YYYY-MM-DD) o texto a DD/MM/YYYY HH:MM para mostrar."""
+    if not texto or not str(texto).strip():
+        return ""
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+        try:
+            dt = datetime.strptime(str(texto).strip(), fmt)
+            return dt.strftime(FORMATO_DATETIME)
+        except ValueError:
+            continue
+    return str(texto)
 
 
 def _tarea_coincide_fecha(tarea, fecha_dia):
@@ -159,6 +201,20 @@ def calcular_color_tarea(tarea):
     if dt_termino and datetime_pc() > dt_termino and estado == ESTADO_PENDIENTE:
         return COLOR_ESTADO[ESTADO_FUERA_PLAZO]
     return COLOR_ESTADO.get(estado, COLORES["amarillo"])
+
+
+def calcular_tinte_tarea(tarea):
+    """Fondo suave según estado para tarjetas en Gestión de Tareas (misma lógica que el color)."""
+    estado = tarea.get("estado", ESTADO_PENDIENTE)
+    if estado in COLOR_ESTADO_TINTE:
+        if estado == ESTADO_PENDIENTE:
+            dt_termino = parsear_datetime(tarea.get("fecha_hora_termino", ""))
+            if dt_termino and datetime_pc() > dt_termino:
+                return COLOR_ESTADO_TINTE[ESTADO_FUERA_PLAZO]
+        return COLOR_ESTADO_TINTE[estado]
+    if estado == "Lista":
+        return COLOR_ESTADO_TINTE[ESTADO_TERMINADA]
+    return COLOR_ESTADO_TINTE.get(estado, "#FFFBEB")
 
 
 class BaseDatos:
@@ -546,6 +602,115 @@ class ModalEstadoTarea(ctk.CTkToplevel):
         self.destroy()
 
 
+class VentanaDetalleTarea(ctk.CTkToplevel):
+    """Ventana flotante para que el Admin vea todos los antecedentes de una tarea, el mensaje del usuario
+    (nota_cierre) y las opciones de gestión. Solo se permite una instancia abierta."""
+
+    def __init__(self, parent, db, tarea_id, admin_id, on_editar, on_archivar, on_eliminar, on_actualizar_lista, on_cerrar, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.db = db
+        self.tarea_id = tarea_id
+        self.admin_id = admin_id
+        self.on_editar = on_editar
+        self.on_archivar = on_archivar
+        self.on_eliminar = on_eliminar
+        self.on_actualizar_lista = on_actualizar_lista
+        self.on_cerrar = on_cerrar
+        self.title("Detalle de Tarea")
+        self.geometry("480x560")
+        self.resizable(True, True)
+        self.minsize(400, 480)
+        self.transient(parent)
+        self.configure(fg_color=COLORES["card"])
+        self.protocol("WM_DELETE_WINDOW", self._on_cerrar)
+        crear_reloj(self, font=("Segoe UI", 9)).pack(anchor="e", padx=20, pady=(8, 0))
+        self._frame_contenido = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._frame_contenido.pack(fill="both", expand=True, padx=20, pady=(0, 16))
+        self._frame_contenido.grid_columnconfigure(1, weight=1)
+        self._crear_contenido()
+
+    def actualizar_tarea(self, tarea_id):
+        """Actualiza el contenido para mostrar otra tarea (sin crear nueva ventana)."""
+        self.tarea_id = tarea_id
+        for w in self._frame_contenido.winfo_children():
+            w.destroy()
+        self._crear_contenido()
+        self.lift()
+        self.focus_set()
+
+    def _on_cerrar(self):
+        self.on_cerrar()
+        self.destroy()
+
+    def _crear_contenido(self):
+        t = self.db.obtener_tarea(self.tarea_id)
+        f = self._frame_contenido
+        if not t:
+            ctk.CTkLabel(f, text="Tarea no encontrada.", font=("Segoe UI", 12)).pack(pady=40, padx=20)
+            return
+
+        r = 0
+        def _fila(eti, val, destacar=False):
+            nonlocal r
+            font_val = ("Segoe UI Semibold", 11) if destacar else ("Segoe UI", 11)
+            ctk.CTkLabel(f, text=eti + ":", font=("Segoe UI", 10),
+                        text_color=COLORES["texto_secundario"]).grid(row=r, column=0, sticky="w", padx=(0, 12), pady=4)
+            ctk.CTkLabel(f, text=val or "—", font=font_val, text_color=COLORES["texto"],
+                        anchor="w", justify="left").grid(row=r, column=1, sticky="ew", pady=4)
+            r += 1
+
+        _fila("Nombre", t.get("nombre", ""), destacar=True)
+        _fila("Responsable", t.get("responsable_nombre", ""))
+        _fila("Inicio", formatear_fecha_display(t.get("fecha_hora_inicio", "")))
+        _fila("Término", formatear_fecha_display(t.get("fecha_hora_termino", "")))
+        _fila("Estado", t.get("estado", ""))
+        _fila("Detalles", (t.get("detalles") or "").strip() or "—")
+
+        # Mensaje del usuario (nota_cierre)
+        nota = (t.get("nota_cierre") or "").strip()
+        r += 1
+        ctk.CTkLabel(f, text="Mensaje del usuario (al cambiar estado):", font=("Segoe UI Semibold", 11),
+                    text_color=COLORES["acento"]).grid(row=r, column=0, columnspan=2, sticky="w", pady=(12, 4))
+        r += 1
+        txt_nota = nota if nota else "Sin mensaje."
+        ctk.CTkLabel(f, text=txt_nota, font=("Segoe UI", 11), text_color=COLORES["texto"],
+                    anchor="w", justify="left", wraplength=400).grid(row=r, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        r += 1
+
+        # Última modificación
+        mod_por = t.get("modificado_por")
+        mod_nom = ""
+        if mod_por:
+            u = self.db.obtener_usuario(mod_por)
+            mod_nom = u.get("nombre", "") if u else ""
+        mod_f = formatear_fecha_display(t.get("fecha_modificacion", ""))
+        _fila("Última modificación por", f"{mod_nom} • {mod_f}" if mod_nom or mod_f else "—")
+
+        # Botones de acción
+        r += 1
+        btn_f = _crear_btns_tarea(f, self._editar, self._archivar, self._eliminar,
+                                  "Desarchivar" if t.get("archivada") else "Archivar")
+        btn_f.grid(row=r, column=0, columnspan=2, pady=(16, 0), sticky="w")
+
+    def _editar(self):
+        self.on_editar(self.tarea_id)
+        self.on_cerrar()
+        self.destroy()
+
+    def _archivar(self):
+        t = self.db.obtener_tarea(self.tarea_id)
+        if t:
+            self.on_archivar(self.tarea_id, not t.get("archivada"))
+        self.on_cerrar()
+        self.destroy()
+
+    def _eliminar(self):
+        if messagebox.askyesno("Confirmar", "¿Eliminar esta tarea?", parent=self):
+            self.on_eliminar(self.tarea_id)
+            self.on_cerrar()
+            self.destroy()
+
+
 # --- PANTALLA INICIAL: Login por pestañas ---
 class PantallaLogin(ctk.CTkFrame):
     def __init__(self, parent, on_usuario, on_admin, **kwargs):
@@ -886,6 +1051,7 @@ class PanelAdmin(TkFrame):
         self.db = db
         self.admin_id = admin_id
         self.volver = volver
+        self._ventana_detalle = None  # Una sola ventana de detalle a la vez
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self._crear_ui()
@@ -899,7 +1065,7 @@ class PanelAdmin(TkFrame):
         crear_reloj(h, font=("Segoe UI", 10)).grid(row=0, column=1, padx=(0, 12))
         ctk.CTkButton(h, text="Cerrar Sesión", command=self.volver, width=140, height=40,
                       fg_color=COLORES["rojo"], corner_radius=10).grid(row=0, column=2, padx=24, pady=16)
-        self.tabview = ctk.CTkTabview(self, fg_color=COLORES["card"], width=800, height=450)
+        self.tabview = ctk.CTkTabview(self, fg_color=COLORES["card"])
         self.tabview.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
         self.tabview.grid_columnconfigure(0, weight=1)
         self.tabview.grid_rowconfigure(0, weight=1)
@@ -1062,55 +1228,70 @@ class PanelAdmin(TkFrame):
 
     def _tab_tareas(self):
         tab = self.tabview.tab("Gestión de Tareas")
-        tab.grid_columnconfigure(0, weight=0)
-        tab.grid_columnconfigure(1, weight=1)
+        tab.grid_columnconfigure(0, weight=0, minsize=260)
+        tab.grid_columnconfigure(1, weight=1, minsize=180)
         tab.grid_rowconfigure(0, weight=1)
-        form = ctk.CTkFrame(tab, width=380, fg_color=COLORES["card"], corner_radius=12, border_width=1)
-        form.grid(row=0, column=0, padx=(0,10), pady=0, sticky="nsew")
-        form.grid_propagate(False)
-        r=0
-        ctk.CTkLabel(form, text="Nueva/Editar Tarea", font=("Segoe UI Semibold", 14)).grid(row=r, column=0, columnspan=2, padx=20, pady=(20,12), sticky="w")
-        r+=1
-        ctk.CTkLabel(form, text="Nombre", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8,2), sticky="w")
+        # Contenedor del formulario con deslizador (scroll)
+        form_outer = ctk.CTkFrame(tab, fg_color=COLORES["card"], corner_radius=12, border_width=1)
+        form_outer.grid(row=0, column=0, padx=(0, 10), pady=0, sticky="nsew")
+        form_outer.grid_rowconfigure(0, weight=1)
+        form_outer.grid_columnconfigure(0, weight=1)
+        form = ctk.CTkScrollableFrame(form_outer, fg_color=COLORES["card"], corner_radius=12)
+        form.pack(fill="both", expand=True)
+        form.grid_columnconfigure(1, weight=1)
+        r = 0
+        ctk.CTkLabel(form, text="Nueva/Editar Tarea", font=("Segoe UI Semibold", 14)).grid(row=r, column=0, columnspan=2, padx=20, pady=(20, 12), sticky="w")
+        r += 1
+        ctk.CTkLabel(form, text="Nombre", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8, 2), sticky="w")
         self.ent_nombre = ctk.CTkEntry(form, height=34)
-        self.ent_nombre.grid(row=r+1, column=0, columnspan=2, padx=20, pady=(0,8), sticky="ew")
-        r+=2
-        ctk.CTkLabel(form, text="Responsable", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8,2), sticky="w")
+        self.ent_nombre.grid(row=r + 1, column=0, columnspan=2, padx=20, pady=(0, 8), sticky="ew")
+        r += 2
+        ctk.CTkLabel(form, text="Responsable", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8, 2), sticky="w")
         us = [u["nombre"] for u in self.db.listar_usuarios() if not u["es_admin"]]
         self.ent_resp = ctk.CTkOptionMenu(form, values=us if us else ["(Crear usuarios primero)"], width=200)
-        self.ent_resp.grid(row=r+1, column=0, columnspan=2, padx=20, pady=(0,8), sticky="ew")
-        r+=2
-        ctk.CTkLabel(form, text="Inicio", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8,2), sticky="w")
+        self.ent_resp.grid(row=r + 1, column=0, columnspan=2, padx=20, pady=(0, 8), sticky="ew")
+        r += 2
+        ctk.CTkLabel(form, text="Inicio", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8, 2), sticky="w")
         f_inicio = ctk.CTkFrame(form, fg_color="transparent")
-        f_inicio.grid(row=r+1, column=0, columnspan=2, padx=20, pady=(0,8), sticky="ew")
+        f_inicio.grid(row=r + 1, column=0, columnspan=2, padx=20, pady=(0, 8), sticky="ew")
         f_inicio.grid_columnconfigure(0, weight=1)
         self.ent_inicio = ctk.CTkEntry(f_inicio, height=34, placeholder_text="DD/MM/AAAA HH:MM")
-        self.ent_inicio.grid(row=0, column=0, padx=(0,8), sticky="ew")
+        self.ent_inicio.grid(row=0, column=0, padx=(0, 8), sticky="ew")
         ctk.CTkButton(f_inicio, text="📅", width=44, height=34, command=lambda: self._abrir_calendario("inicio")).grid(row=0, column=1)
-        r+=2
-        ctk.CTkLabel(form, text="Término", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8,2), sticky="w")
+        r += 2
+        ctk.CTkLabel(form, text="Término", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8, 2), sticky="w")
         f_termino = ctk.CTkFrame(form, fg_color="transparent")
-        f_termino.grid(row=r+1, column=0, columnspan=2, padx=20, pady=(0,8), sticky="ew")
+        f_termino.grid(row=r + 1, column=0, columnspan=2, padx=20, pady=(0, 8), sticky="ew")
         f_termino.grid_columnconfigure(0, weight=1)
         self.ent_termino = ctk.CTkEntry(f_termino, height=34, placeholder_text="DD/MM/AAAA HH:MM")
-        self.ent_termino.grid(row=0, column=0, padx=(0,8), sticky="ew")
+        self.ent_termino.grid(row=0, column=0, padx=(0, 8), sticky="ew")
         ctk.CTkButton(f_termino, text="📅", width=44, height=34, command=lambda: self._abrir_calendario("termino")).grid(row=0, column=1)
-        r+=2
-        ctk.CTkLabel(form, text="Detalles:").grid(row=r, column=0, padx=20, pady=(8,2), sticky="w")
+        r += 2
+        ctk.CTkLabel(form, text="Detalles:", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8, 2), sticky="w")
         self.txt_det = ctk.CTkTextbox(form, height=60)
-        self.txt_det.grid(row=r+1, column=0, columnspan=2, padx=20, pady=(0,8), sticky="ew")
-        r+=2
-        ctk.CTkLabel(form, text="Estado:").grid(row=r, column=0, padx=20, pady=(8,2), sticky="w")
+        self.txt_det.grid(row=r + 1, column=0, columnspan=2, padx=20, pady=(0, 8), sticky="ew")
+        r += 2
+        ctk.CTkLabel(form, text="Estado:", font=("Segoe UI", 10)).grid(row=r, column=0, padx=20, pady=(8, 2), sticky="w")
         self.combo_est = ctk.CTkOptionMenu(form, values=ESTADOS_TODOS, width=200)
-        self.combo_est.grid(row=r+1, column=0, columnspan=2, padx=20, pady=(0,12), sticky="ew")
-        r+=2
+        self.combo_est.grid(row=r + 1, column=0, columnspan=2, padx=20, pady=(0, 12), sticky="ew")
+        r += 2
         self.tarea_edit_id = None
-        ctk.CTkButton(form, text="Guardar", command=self._guardar_tarea, fg_color=COLORES["verde"]).grid(row=r, column=0, padx=20, pady=12)
-        ctk.CTkButton(form, text="Limpiar", command=lambda: self._limpiar_form_tarea()).grid(row=r, column=1, padx=20, pady=12)
-        self.contenedor_t = ctk.CTkScrollableFrame(tab, fg_color="transparent")
-        self._actualizar_combo_responsable()
-        self.contenedor_t.grid(row=0, column=1, sticky="nsew", padx=(10,0), pady=0)
+        ctk.CTkButton(form, text="Guardar", command=self._guardar_tarea, fg_color=COLORES["verde"]).grid(row=r, column=0, padx=20, pady=(12, 20))
+        ctk.CTkButton(form, text="Limpiar", command=lambda: self._limpiar_form_tarea()).grid(row=r, column=1, padx=20, pady=(12, 20))
+        # Panel derecho: botón Actualizar + lista de tareas
+        f_derecha = ctk.CTkFrame(tab, fg_color="transparent")
+        f_derecha.grid(row=0, column=1, sticky="nsew", padx=(10, 0), pady=0)
+        f_derecha.grid_rowconfigure(1, weight=1)
+        f_derecha.grid_columnconfigure(0, weight=1)
+        f_header = ctk.CTkFrame(f_derecha, fg_color="transparent")
+        f_header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        f_header.grid_columnconfigure(0, weight=1)
+        ctk.CTkButton(f_header, text="🔄 Actualizar", command=self._cargar_tareas_admin, width=120,
+                     fg_color=COLORES["acento"]).grid(row=0, column=0, sticky="e")
+        self.contenedor_t = ctk.CTkScrollableFrame(f_derecha, fg_color="transparent")
+        self.contenedor_t.grid(row=1, column=0, sticky="nsew")
         self.contenedor_t.grid_columnconfigure(0, weight=1)
+        self._actualizar_combo_responsable()
         self._cargar_tareas_admin()
 
     def _guardar_tarea(self):
@@ -1129,6 +1310,9 @@ class PanelAdmin(TkFrame):
             messagebox.showerror("Error", "Formato fecha: DD/MM/AAAA HH:MM", parent=self.winfo_toplevel())
             return
         resp_id = next((u["id"] for u in self.db.listar_usuarios() if u["nombre"] == resp_nom), None)
+        if resp_id is None:
+            messagebox.showerror("Error", "Responsable no encontrado. Elija otro usuario.", parent=self.winfo_toplevel())
+            return
         inicio_f = dt_i.strftime(FORMATO_DATETIME)
         termino_f = dt_t.strftime(FORMATO_DATETIME)
         detalles = self.txt_det.get("1.0", "end").strip()
@@ -1156,19 +1340,38 @@ class PanelAdmin(TkFrame):
             w.destroy()
         for t in self.db.listar_tareas_admin(incluir_archivadas=True):
             color = calcular_color_tarea(t)
+            tinte = calcular_tinte_tarea(t)
             tid = t["id"]
-            f = ctk.CTkFrame(self.contenedor_t, fg_color=COLORES["card"], corner_radius=8, border_width=2, border_color=color)
+            f = ctk.CTkFrame(self.contenedor_t, fg_color=tinte, corner_radius=8, border_width=2, border_color=color, cursor="hand2")
             f.grid_columnconfigure(1, weight=1)
-            f.grid(row=len(self.contenedor_t.winfo_children()), column=0, sticky="ew", pady=(0,8))
-            SemáforoCircular(f, color, 24).grid(row=0, column=0, rowspan=2, padx=(12,8), pady=10, sticky="ns")
-            ctk.CTkLabel(f, text=t["nombre"], font=("Segoe UI", 12)).grid(row=0, column=1, padx=(0,8), pady=(10,2), sticky="ew")
+            f.grid(row=len(self.contenedor_t.winfo_children()), column=0, sticky="ew", pady=(0, 8))
+            SemáforoCircular(f, color, 24).grid(row=0, column=0, rowspan=2, padx=(12, 8), pady=10, sticky="ns")
+            ctk.CTkLabel(f, text=t["nombre"], font=("Segoe UI", 12)).grid(row=0, column=1, padx=(0, 8), pady=(10, 2), sticky="ew")
             ctk.CTkLabel(f, text=f"{t.get('responsable_nombre','')} • {t.get('estado','')}", font=("Segoe UI", 10),
-                        text_color=COLORES["texto_secundario"]).grid(row=1, column=1, padx=(0,8), pady=(0,10), sticky="ew")
-            ctk.CTkButton(f, text="Editar", width=60, command=lambda i=tid: self._editar_tarea(i)).grid(row=0, column=2, rowspan=2, padx=8, pady=10)
-            ctk.CTkButton(f, text="Archivar" if not t.get("archivada") else "Desarchivar", width=70,
-                         command=lambda i=tid, a=not t.get("archivada"): self._archivar(i,a)).grid(row=0, column=3, rowspan=2, padx=4, pady=10)
-            ctk.CTkButton(f, text="Eliminar", width=60, fg_color=COLORES["rojo"],
-                         command=lambda i=tid: self._eliminar_tarea(i)).grid(row=0, column=4, rowspan=2, padx=8, pady=10)
+                        text_color=COLORES["texto_secundario"]).grid(row=1, column=1, padx=(0, 8), pady=(0, 10), sticky="ew")
+            hint = ctk.CTkLabel(f, text="Ver detalle →", font=("Segoe UI", 10),
+                                text_color=COLORES["texto_secundario"], cursor="hand2")
+            hint.grid(row=0, column=2, rowspan=2, padx=12, pady=10, sticky="e")
+            _cmd = lambda e, i=tid: self._abrir_detalle_tarea(i)
+            f.bind("<Button-1>", _cmd)
+            for w in f.winfo_children():
+                w.bind("<Button-1>", _cmd)
+
+    def _abrir_detalle_tarea(self, tarea_id):
+        """Abre la ventana flotante con todos los antecedentes, mensaje del usuario y opciones.
+        Si ya está abierta, actualiza el contenido y la trae al frente (una sola ventana)."""
+        def _on_cerrar():
+            self._ventana_detalle = None
+            self._cargar_tareas_admin()
+
+        if self._ventana_detalle and self._ventana_detalle.winfo_exists():
+            self._ventana_detalle.actualizar_tarea(tarea_id)
+            return
+
+        self._ventana_detalle = VentanaDetalleTarea(
+            self.winfo_toplevel(), self.db, tarea_id, self.admin_id,
+            self._editar_tarea, self._archivar, self._eliminar_tarea_directo, self._cargar_tareas_admin, _on_cerrar
+        )
 
     def _editar_tarea(self, id_t):
         t = self.db.obtener_tarea(id_t)
@@ -1200,6 +1403,11 @@ class PanelAdmin(TkFrame):
         if messagebox.askyesno("Confirmar", "¿Eliminar tarea?"):
             self.db.eliminar_tarea(id_t)
             self._cargar_tareas_admin()
+
+    def _eliminar_tarea_directo(self, id_t):
+        """Elimina sin confirmar (la confirmación la hace la ventana de detalle)."""
+        self.db.eliminar_tarea(id_t)
+        self._cargar_tareas_admin()
 
     def _tab_estadisticas(self):
         tab = self.tabview.tab("Estadísticas")
